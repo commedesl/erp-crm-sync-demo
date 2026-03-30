@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body {
+      font-family: "Segoe UI", Arial;
+      margin: 0;
+      background: #f4f6f8;
+    }
+
+    header {
+      background: #1e3a5f;
+      color: white;
+      padding: 16px 24px;
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .container {
+      padding: 24px;
+    }
+
+    .card {
+      background: white;
+      padding: 20px;
+      margin-bottom: 20px;
+      border-radius: 6px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+    }
+
+    button {
+      background: #1e3a5f;
+      color: white;
+      border: none;
+      padding: 8px 14px;
+      margin-right: 8px;
+      cursor: pointer;
+    }
+
+    button.secondary {
+      background: #6c757d;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+
+    th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+    }
+
+    th {
+      background: #eef2f6;
+    }
+
+    input {
+      width: 95%;
+      padding: 4px;
+      border: 1px solid #ccc;
+      box-sizing: border-box;
+    }
+
+    .message {
+      margin: 10px 0;
+      font-weight: bold;
+      color: #1e3a5f;
+    }
+
+    .login-box {
+      width: 300px;
+      margin: 120px auto;
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      text-align: center;
+    }
+
+    .login-box input {
+      width: 100%;
+      margin-bottom: 10px;
+      padding: 8px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- LOGIN -->
+  <div id="loginPage">
+    <div class="login-box">
+      <h2>ERP 系統</h2>
+      <input id="username" placeholder="帳號">
+      <input id="password" type="password" placeholder="密碼">
+      <button onclick="login()">登入</button>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div id="mainPage" style="display:none;">
+    <header>ERP 系統 - 專案管理</header>
+
+    <div class="container">
+      <div class="card">
+        <button onclick="loadERP()">載入 ERP 資料</button>
+        <button onclick="loadDiff()">查看差異</button>
+        <button onclick="sync()">同步到 CRM</button>
+        <button class="secondary" onclick="resetDemo()">重設展示資料</button>
+        <button class="secondary" onclick="logout()">登出</button>
+        <div id="msg" class="message"></div>
+      </div>
+
+      <div class="card">
+        <h3>ERP 資料</h3>
+        <div id="erpTable"></div>
+      </div>
+
+      <div class="card">
+        <h3>差異清單</h3>
+        <div id="diffTable"></div>
+      </div>
+
+      <div class="card">
+        <h3>新增案件</h3>
+        <table>
+          <tr>
+            <th>客戶代號</th>
+            <th>客戶名稱</th>
+            <th>專案名稱</th>
+            <th>聯絡人</th>
+            <th>狀態</th>
+            <th>操作</th>
+          </tr>
+          <tr>
+            <td><input id="new_customer_id"></td>
+            <td><input id="new_customer_name"></td>
+            <td><input id="new_projectname"></td>
+            <td><input id="new_contact_person"></td>
+            <td><input id="new_status"></td>
+            <td><button onclick="addRecord()">新增</button></td>
+          </tr>
+        </table>
+        <div style="margin-top:8px; color:#666;">專案編號由系統自動產生</div>
+      </div>
+    </div>
+  </div>
+
+  
+
+  <script>
+    let erpCache = [];
+
+  function login(){
+    const u = document.getElementById("username").value;
+    const p = document.getElementById("password").value;
+
+    if(u === "admin" && p === "123"){
+      sessionStorage.setItem("erp_logged_in", "true");
+      document.getElementById("loginPage").style.display = "none";
+      document.getElementById("mainPage").style.display = "block";
+      loadERP();
+    } else {
+      alert("帳號或密碼錯誤");
+    }
+  }
+
+    const headerMap = {
+      customer_id: "客戶代號",
+      customer_name: "客戶名稱",
+      projectname: "專案名稱",
+      projectno: "專案編號",
+      contact_person: "聯絡人",
+      status: "狀態"
+    };
+
+    const displayOrder = [
+      "customer_id",
+      "customer_name",
+      "projectname",
+      "projectno",
+      "contact_person",
+      "status"
+    ];
+
+    function renderTable(data, target){
+      if(!data || data.length === 0){
+        document.getElementById(target).innerHTML = "沒有資料";
+        return;
+      }
+
+      let html = "<table><tr>";
+      displayOrder.forEach(h => html += `<th>${headerMap[h] || h}</th>`);
+      html += "<th>操作</th></tr>";
+
+      data.forEach((row,i)=>{
+        html += "<tr>";
+        displayOrder.forEach(h=>{
+          if(h==="projectno"){
+            html += `<td>${row[h] || ""}</td>`;
+          } else {
+            html += `<td><input id="${h}_${i}" value="${row[h]||""}"></td>`;
+          }
+        });
+        html += `<td><button onclick="save(${i})">儲存</button></td>`;
+        html += "</tr>";
+      });
+
+      html += "</table>";
+      document.getElementById(target).innerHTML = html;
+    }
+
+    function loadERP(){
+      document.getElementById("msg").innerText = "載入中...";
+      google.script.run.withSuccessHandler(data=>{
+        erpCache = data;
+        renderTable(data,"erpTable");
+        document.getElementById("msg").innerText = "載入完成";
+      }).getERPData();
+    }
+
+    function loadDiff(){
+      document.getElementById("msg").innerText = "比對中...";
+      google.script.run.withSuccessHandler(data=>{
+        renderDifferenceTable(data);
+        document.getElementById("msg").innerText =
+          data.length===0 ? "目前沒有差異" : "共有 " + data.length + " 筆差異";
+      }).getDifferences();
+    }
+
+    function renderDifferenceTable(data){
+      const target = document.getElementById("diffTable");
+
+      if(!data || data.length === 0){
+        target.innerHTML = "沒有資料";
+        return;
+      }
+
+      const diffHeaderMap = {
+        projectno: "專案編號",
+        customer_name: "客戶名稱",
+        field_name: "差異欄位",
+        erp_value: "ERP 值",
+        crm_value: "CRM 值",
+        result: "結果"
+      };
+
+      const diffOrder = [
+        "projectno",
+        "customer_name",
+        "field_name",
+        "erp_value",
+        "crm_value",
+        "result"
+      ];
+
+      let html = "<table><tr>";
+      diffOrder.forEach(h => html += `<th>${diffHeaderMap[h] || h}</th>`);
+      html += "</tr>";
+
+      data.forEach(row=>{
+        html += "<tr>";
+        diffOrder.forEach(h=>{
+          html += `<td>${row[h] || ""}</td>`;
+        });
+        html += "</tr>";
+      });
+
+      html += "</table>";
+      target.innerHTML = html;
+    }
+
+    function save(i){
+      let row = erpCache[i];
+      let updated = {};
+
+      Object.keys(row).forEach(h=>{
+        if(h==="projectno"){
+          updated[h]=row[h];
+        } else {
+          const el = document.getElementById(h+"_"+i);
+          updated[h]=el ? el.value : row[h];
+        }
+      });
+
+      document.getElementById("msg").innerText="儲存中...";
+      google.script.run.withSuccessHandler(msg=>{
+        document.getElementById("msg").innerText=msg;
+        loadERP();
+      }).updateERPRecord(row.projectno,updated);
+    }
+
+    function sync(){
+      document.getElementById("msg").innerText="同步中...";
+      google.script.run.withSuccessHandler(msg=>{
+        document.getElementById("msg").innerText=msg;
+        loadDiff();
+      }).runSync();
+    }
+
+    function resetDemo(){
+      document.getElementById("msg").innerText="重設中...";
+      google.script.run.withSuccessHandler(msg=>{
+        document.getElementById("msg").innerText=msg;
+        loadERP();
+      }).resetDemoData();
+    }
+
+    function addRecord() {
+      const newData = {
+        customer_id: document.getElementById("new_customer_id").value.trim(),
+        customer_name: document.getElementById("new_customer_name").value.trim(),
+        projectname: document.getElementById("new_projectname").value.trim(),
+        contact_person: document.getElementById("new_contact_person").value.trim(),
+        status: document.getElementById("new_status").value.trim()
+      };
+
+      if (!newData.customer_id || !newData.customer_name || !newData.projectname) {
+        document.getElementById("msg").innerText = "請至少填寫客戶代號、客戶名稱、專案名稱";
+        return;
+      }
+
+      document.getElementById("msg").innerText = "新增中...";
+      google.script.run.withSuccessHandler(function(msg) {
+        document.getElementById("msg").innerText = msg;
+        loadERP();
+
+        document.getElementById("new_customer_id").value = "";
+        document.getElementById("new_customer_name").value = "";
+        document.getElementById("new_projectname").value = "";
+        document.getElementById("new_contact_person").value = "";
+        document.getElementById("new_status").value = "";
+      }).addERPRecord(newData);
+    }
+
+    function logout() {
+      sessionStorage.removeItem("erp_logged_in");
+      document.getElementById("loginPage").style.display = "block";
+      document.getElementById("mainPage").style.display = "none";
+    }
+
+    window.onload = function () {
+      const isLoggedIn = sessionStorage.getItem("erp_logged_in");
+
+      if (isLoggedIn === "true") {
+        document.getElementById("loginPage").style.display = "none";
+        document.getElementById("mainPage").style.display = "block";
+        loadERP();
+      } else {
+        document.getElementById("loginPage").style.display = "block";
+        document.getElementById("mainPage").style.display = "none";
+      }
+    };
+  </script>
+
+</body>
+</html>

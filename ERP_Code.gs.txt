@@ -1,0 +1,329 @@
+const SPREADSHEET_ID = "19xPM-brrrQsRcYLfnuWOC3R6i5Il-WaDLWTr_EIKXec";
+
+function getSpreadsheet() {
+  return SpreadsheetApp.openById(SPREADSHEET_ID);
+}
+
+function getSheetData(sheetName) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet) {
+    throw new Error(`找不到工作表：${sheetName}`);
+  }
+
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) {
+    return [];
+  }
+
+  const headers = data[0];
+  const rows = data.slice(1);
+
+  return rows.map(row => {
+    let obj = {};
+    headers.forEach((header, index) => {
+      obj[header] = row[index];
+    });
+    return obj;
+  });
+}
+
+function compareERPAndCRM() {
+  const erpData = getSheetData("ERP_Data");
+  const crmData = getSheetData("CRM_Data");
+
+  const crmMap = {};
+  crmData.forEach(row => {
+    crmMap[row.projectno] = row;
+  });
+
+  const differences = [];
+
+  erpData.forEach(erpRow => {
+    const projectNo = formatProjectNo(erpRow.projectno);
+    const crmRow = crmMap[projectNo];
+
+    if (!crmRow) {
+      differences.push({
+        projectno: projectNo,
+        customer_name: erpRow.customer_name,
+        field_name: "record",
+        erp_value: "ERP有此案件",
+        crm_value: "CRM找不到此案件",
+        result: "missing_in_crm"
+      });
+      return;
+    }
+
+    const fieldsToCompare = ["customer_name", "projectname", "status"];
+
+    fieldsToCompare.forEach(field => {
+      const erpValue = String(erpRow[field]).trim();
+      const crmValue = String(crmRow[field]).trim();
+
+      if (erpValue !== crmValue) {
+        differences.push({
+          projectno: projectNo,
+          customer_name: erpRow.customer_name,
+          field_name: field,
+          erp_value: erpValue,
+          crm_value: crmValue,
+          result: "different"
+        });
+      }
+    });
+  });
+
+  Logger.log(JSON.stringify(differences, null, 2));
+  return differences;
+}
+
+function writeDifferencesToLog() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const logSheet = ss.getSheetByName("Sync_Log");
+
+  const differences = compareERPAndCRM();
+
+  if (differences.length === 0) {
+    Logger.log("沒有差異，不需要寫入 log");
+    return;
+  }
+
+  const now = new Date();
+
+  const rows = differences.map(diff => [
+    now,
+    diff.projectno,
+    diff.customer_name,
+    diff.field_name,
+    diff.erp_value,
+    diff.crm_value,
+    diff.result
+  ]);
+
+  logSheet.getRange(logSheet.getLastRow() + 1, 1, rows.length, rows[0].length)
+    .setValues(rows);
+
+  Logger.log("已寫入 Sync_Log");
+}
+
+
+function syncERPToCRM() {
+  const ss = getSpreadsheet();
+  const crmSheet = ss.getSheetByName("CRM_Data");
+  const logSheet = ss.getSheetByName("Sync_Log");
+
+  const erpData = getSheetData("ERP_Data");
+  const crmRange = crmSheet.getDataRange();
+  const crmValues = crmRange.getValues();
+  const crmHeaders = crmValues[0];
+
+  const crmProjectNoIndex = crmHeaders.indexOf("projectno");
+  const crmCustomerNameIndex = crmHeaders.indexOf("customer_name");
+  const crmProjectNameIndex = crmHeaders.indexOf("projectname");
+  const crmStatusIndex = crmHeaders.indexOf("status");
+  const crmEmailIndex = crmHeaders.indexOf("email_msg");
+  const crmSampleIndex = crmHeaders.indexOf("sample_request");
+
+  const now = new Date();
+  const logRows = [];
+
+  // 先建立 CRM 現有 projectno 對照
+  const crmMap = {};
+  for (let i = 1; i < crmValues.length; i++) {
+    const crmProjectNo = formatProjectNo(crmValues[i][crmProjectNoIndex]);
+    crmMap[crmProjectNo] = i;
+  }
+
+  // 逐筆檢查 ERP
+  erpData.forEach(erpRow => {
+    const projectNo = formatProjectNo(erpRow.projectno);
+
+    // 情況1：CRM 沒有這筆 → 新增
+    if (crmMap[projectNo] === undefined) {
+      const newRow = new Array(crmHeaders.length).fill("");
+
+      newRow[crmCustomerNameIndex] = String(erpRow.customer_name || "").trim();
+      newRow[crmProjectNameIndex] = String(erpRow.projectname || "").trim();
+      newRow[crmProjectNoIndex] = projectNo;
+      newRow[crmStatusIndex] = String(erpRow.status || "").trim();
+
+      if (crmEmailIndex !== -1) newRow[crmEmailIndex] = "";
+      if (crmSampleIndex !== -1) newRow[crmSampleIndex] = "";
+
+      crmValues.push(newRow);
+
+      logRows.push([
+        now,
+        projectNo,
+        String(erpRow.customer_name || "").trim(),
+        "record",
+        "ERP有此案件",
+        "CRM找不到此案件",
+        "inserted"
+      ]);
+
+      crmMap[projectNo] = crmValues.length - 1;
+    } else {
+      // 情況2：CRM 有這筆 → 更新共用欄位
+      const i = crmMap[projectNo];
+
+      const fields = [
+        { name: "customer_name", index: crmCustomerNameIndex },
+        { name: "projectname", index: crmProjectNameIndex },
+        { name: "status", index: crmStatusIndex }
+      ];
+
+      fields.forEach(field => {
+        const crmOldValue = String(crmValues[i][field.index] || "").trim();
+        const erpNewValue = String(erpRow[field.name] || "").trim();
+
+        if (crmOldValue !== erpNewValue) {
+          crmValues[i][field.index] = erpNewValue;
+
+          logRows.push([
+            now,
+            projectNo,
+            String(erpRow.customer_name || "").trim(),
+            field.name,
+            erpNewValue,
+            crmOldValue,
+            "synced"
+          ]);
+        }
+      });
+    }
+  });
+
+  // 回寫 CRM
+  crmSheet.clearContents();
+  crmSheet.getRange(1, 1, crmValues.length, crmValues[0].length).setValues(crmValues);
+
+  // 寫入 Log
+  if (logRows.length > 0) {
+    logSheet.getRange(logSheet.getLastRow() + 1, 1, logRows.length, logRows[0].length)
+      .setValues(logRows);
+  }
+
+  return `同步完成，共處理 ${logRows.length} 筆紀錄`;
+}
+
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile("erp");
+}
+
+function getERPData() {
+  return getSheetData("ERP_Data");
+}
+
+function getCRMData() {
+  return getSheetData("CRM_Data");
+}
+
+function getDifferences() {
+  return compareERPAndCRM();
+}
+
+function runSync() {
+  syncERPToCRM();
+  return "同步完成";
+}
+
+function resetDemoData() {
+  const ss = SpreadsheetApp.openById("19xPM-brrrQsRcYLfnuWOC3R6i5Il-WaDLWTr_EIKXec");
+
+  const erpSheet = ss.getSheetByName("ERP_Data");
+  const crmSheet = ss.getSheetByName("CRM_Data");
+
+  // ERP 資料（標準版）
+  const erpData = [
+    ["customer_id","customer_name","projectname","projectno","contact_person","status"],
+    ["C001","安可科技","美國新案A","'001","王小明","進行中"],
+    ["C002","大谷電子","日本新案B","'002","陳美華","已報價"],
+    ["C003","家正科技","歐洲新案C","'003","林志強","打樣中"]
+  ];
+
+  // CRM 資料（故意有差異）
+  const crmData = [
+    ["customer_name","projectname","projectno","status","email_msg","sample_request"],
+    ["安可科技","美國新案A","'001","待確認","已寄開發信","需要樣品A"],
+    ["大谷電子","日本新案B","'002","已報價","客戶回覆中","無"],
+    ["家正科技","歐洲舊案C","'003","洽談中","尚未聯絡","需要樣品B"]
+  ];
+
+  erpSheet.clear();
+  crmSheet.clear();
+
+  erpSheet.getRange(1,1,erpData.length,erpData[0].length).setValues(erpData);
+  crmSheet.getRange(1,1,crmData.length,crmData[0].length).setValues(crmData);
+
+  return "Demo 資料已重置";
+}
+
+function resetDemo() {
+  document.getElementById("message").innerText = "重置資料中...";
+  google.script.run.withSuccessHandler(function(msg){
+    document.getElementById("message").innerText = msg;
+    loadERPData();
+  }).resetDemoData();
+}
+
+function getNextProjectNo() {
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName("Sequence_Control");
+
+  const data = sheet.getDataRange().getValues();
+  let current = Number(data[1][1]);
+
+  current = current + 1;
+  sheet.getRange(2, 2).setValue(current);
+
+  return formatProjectNo(current);
+}
+
+function addERPRecord(newData) {
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName("ERP_Data");
+
+  // 正確：從中央發號拿新號碼
+  const projectno = getNextProjectNo();
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+  const rowData = headers.map(header => {
+    if (header === "projectno") return projectno;
+    return newData[header] || "";
+  });
+
+  sheet.appendRow(rowData);
+
+  return "ERP 新案件已新增，專案編號：" + projectno;
+}
+
+function formatProjectNo(value) {
+  return String(value).padStart(3, "0");
+}
+
+function updateERPRecord(projectno, updatedData) {
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName("ERP_Data");
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+
+  const projectnoIndex = headers.indexOf("projectno");
+
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][projectnoIndex]).trim() === String(projectno).trim()) {
+      headers.forEach((header, index) => {
+        if (updatedData.hasOwnProperty(header)) {
+          data[i][index] = updatedData[header];
+        }
+      });
+      break;
+    }
+  }
+
+  sheet.getRange(1, 1, data.length, data[0].length).setValues(data);
+  return "ERP 資料已更新";
+}

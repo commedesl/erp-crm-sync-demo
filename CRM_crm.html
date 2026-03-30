@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body {
+      font-family: "Segoe UI", Arial, sans-serif;
+      margin: 0;
+      background: #f1f3f5;
+      color: #2f3437;
+    }
+
+    header {
+      background: #5f676e;
+      color: white;
+      padding: 16px 24px;
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+
+    .container {
+      padding: 24px;
+    }
+
+    .card {
+      background: white;
+      padding: 20px;
+      margin-bottom: 20px;
+      border-radius: 6px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+    }
+
+    .login-box {
+      width: 320px;
+      margin: 120px auto;
+      background: white;
+      padding: 32px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.10);
+      text-align: center;
+    }
+
+    .login-box input {
+      width: 100%;
+      margin-bottom: 12px;
+      padding: 10px;
+      border: 1px solid #c8ced3;
+      box-sizing: border-box;
+    }
+
+    button {
+      background: #5f676e;
+      color: white;
+      border: none;
+      padding: 8px 14px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      opacity: 0.95;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+
+    th, td {
+      border: 1px solid #d8dde1;
+      padding: 8px;
+      text-align: left;
+      vertical-align: middle;
+    }
+
+    th {
+      background: #eceff1;
+      font-weight: 600;
+    }
+
+    input {
+      width: 95%;
+      padding: 6px;
+      border: 1px solid #c8ced3;
+      box-sizing: border-box;
+    }
+
+    .readonly {
+      background: #f7f8f9;
+      color: #5d666d;
+      padding: 6px;
+      display: block;
+      min-height: 20px;
+    }
+
+    .message {
+      margin-top: 10px;
+      font-weight: 600;
+      color: #5f676e;
+    }
+
+    h3 {
+      margin-top: 0;
+    }
+  </style>
+</head>
+<body>
+
+<div id="loginPage">
+  <div class="login-box">
+    <h2>CRM 系統</h2>
+    <input id="username" placeholder="帳號">
+    <input id="password" type="password" placeholder="密碼">
+    <button onclick="login()">登入</button>
+  </div>
+</div>
+
+<div id="mainPage" style="display:none;">
+  <header>CRM 系統 - 案件追蹤管理</header>
+
+  <div class="container">
+    <div class="card">
+      <button onclick="loadCRM()">載入 CRM 資料</button>
+      <button class="secondary" onclick="logout()">登出</button>
+      <div id="msg" class="message"></div>      
+    </div>
+
+    <div class="card">
+      <h3>CRM 資料</h3>
+      <div id="crmTable"></div>
+    </div>
+
+    <div class="card">
+      <h3>新增案件</h3>
+      <table>
+        <tr>
+          <th>客戶名稱</th>
+          <th>專案名稱</th>
+          <th>狀態</th>
+          <th>Email 記錄</th>
+          <th>樣品需求</th>
+          <th>操作</th>
+        </tr>
+        <tr>
+          <td><input id="crm_new_customer_name"></td>
+          <td><input id="crm_new_projectname"></td>
+          <td><input id="crm_new_status"></td>
+          <td><input id="crm_new_email"></td>
+          <td><input id="crm_new_sample"></td>
+          <td><button onclick="addCRM()">新增</button></td>
+        </tr>
+      </table>
+      <div style="margin-top:8px; color:#666;">專案編號由系統自動產生</div>
+    </div>  
+  </div>
+</div>
+
+
+
+<script>
+  let crmCache = [];
+
+  const headerMap = {
+    customer_name: "客戶名稱",
+    projectname: "專案名稱",
+    projectno: "專案編號",
+    status: "狀態",
+    email_msg: "Email 記錄",
+    sample_request: "樣品需求"
+  };
+
+  const editableFields = ["email_msg", "sample_request"];
+
+  function login() {
+    const u = document.getElementById("username").value;
+    const p = document.getElementById("password").value;
+
+    if (u === "crm" && p === "123") {
+      sessionStorage.setItem("crm_logged_in", "true");
+      document.getElementById("loginPage").style.display = "none";
+      document.getElementById("mainPage").style.display = "block";
+      loadCRM();
+    } else {
+      alert("帳號或密碼錯誤");
+    }
+  }
+
+  function renderCRMTable(data) {
+    const container = document.getElementById("crmTable");
+
+    if (!data || data.length === 0) {
+      container.innerHTML = "沒有資料";
+      return;
+    }
+
+    crmCache = data;
+
+    const displayOrder = [
+      "customer_name",
+      "projectname",
+      "projectno",
+      "status",
+      "email_msg",
+      "sample_request"
+    ];
+
+    let html = "<table><tr>";
+    displayOrder.forEach(h => {
+      html += `<th>${headerMap[h] || h}</th>`;
+    });
+    html += "<th>操作</th></tr>";
+
+    data.forEach((row, i) => {
+      html += "<tr>";
+      displayOrder.forEach(h => {
+        if (editableFields.includes(h)) {
+          html += `<td><input id="${h}_${i}" value="${row[h] || ""}"></td>`;
+        } else {
+          html += `<td><span class="readonly">${row[h] || ""}</span></td>`;
+        }
+      });
+      html += `<td><button onclick="save(${i})">儲存</button></td>`;
+      html += "</tr>";
+    });
+
+    html += "</table>";
+    container.innerHTML = html;
+  }
+
+  function loadCRM() {
+    document.getElementById("msg").innerText = "載入中...";
+    google.script.run.withSuccessHandler(data => {
+      renderCRMTable(data);
+      document.getElementById("msg").innerText = "載入完成";
+    }).getCRMData();
+  }
+
+  function save(i) {
+    const row = crmCache[i];
+    const updated = {
+      email_msg: document.getElementById(`email_msg_${i}`).value,
+      sample_request: document.getElementById(`sample_request_${i}`).value
+    };
+
+    document.getElementById("msg").innerText = "儲存中...";
+    google.script.run.withSuccessHandler(msg => {
+      document.getElementById("msg").innerText = msg;
+      loadCRM();
+    }).updateCRMRecord(row.projectno, updated);
+  }
+
+  function logout() {
+    sessionStorage.removeItem("crm_logged_in");
+    document.getElementById("loginPage").style.display = "block";
+    document.getElementById("mainPage").style.display = "none";
+  }
+
+  window.onload = function () {
+    const isLoggedIn = sessionStorage.getItem("crm_logged_in");
+
+    if (isLoggedIn === "true") {
+      document.getElementById("loginPage").style.display = "none";
+      document.getElementById("mainPage").style.display = "block";
+      loadCRM();
+    } else {
+      document.getElementById("loginPage").style.display = "block";
+      document.getElementById("mainPage").style.display = "none";
+    }
+  };
+
+  function addCRM() {
+    const newData = {
+      customer_name: document.getElementById("crm_new_customer_name").value.trim(),
+      projectname: document.getElementById("crm_new_projectname").value.trim(),
+      status: document.getElementById("crm_new_status").value.trim(),
+      email_msg: document.getElementById("crm_new_email").value.trim(),
+      sample_request: document.getElementById("crm_new_sample").value.trim()
+    };
+
+    if (!newData.customer_name || !newData.projectname) {
+      document.getElementById("msg").innerText = "請填寫客戶名稱與專案名稱";
+      return;
+    }
+
+    document.getElementById("msg").innerText = "新增中...";
+
+    google.script.run.withSuccessHandler(function(msg) {
+      document.getElementById("msg").innerText = msg;
+      loadCRM();
+
+      document.getElementById("crm_new_customer_name").value = "";
+      document.getElementById("crm_new_projectname").value = "";
+      document.getElementById("crm_new_status").value = "";
+      document.getElementById("crm_new_email").value = "";
+      document.getElementById("crm_new_sample").value = "";
+    }).addCRMRecord(newData);
+  }
+
+</script>
+
+</body>
+</html>

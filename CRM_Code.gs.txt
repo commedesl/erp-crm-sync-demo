@@ -1,0 +1,97 @@
+const SPREADSHEET_ID = "19xPM-brrrQsRcYLfnuWOC3R6i5Il-WaDLWTr_EIKXec";
+
+function getSpreadsheet() {
+  return SpreadsheetApp.openById(SPREADSHEET_ID);
+}
+
+function getSheetData(sheetName) {
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet) {
+    throw new Error(`找不到工作表：${sheetName}`);
+  }
+
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) {
+    return [];
+  }
+
+  const headers = data[0];
+  const rows = data.slice(1);
+
+  return rows.map(row => {
+    let obj = {};
+    headers.forEach((header, index) => {
+      obj[header] = row[index];
+    });
+    return obj;
+  });
+}
+
+function getCRMData() {
+  return getSheetData("CRM_Data");
+}
+
+function updateCRMRecord(projectno, updatedData) {
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName("CRM_Data");
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const projectnoIndex = headers.indexOf("projectno");
+
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][projectnoIndex]).trim() === String(projectno).trim()) {
+      headers.forEach((header, index) => {
+        if (updatedData.hasOwnProperty(header)) {
+          data[i][index] = updatedData[header];
+        }
+      });
+      break;
+    }
+  }
+
+  sheet.getRange(1, 1, data.length, data[0].length).setValues(data);
+  return "CRM 資料已更新";
+}
+
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile("crm");
+}
+
+function getNextProjectNo() {
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName("Sequence_Control");
+
+  const data = sheet.getDataRange().getValues();
+  let current = Number(data[1][1]);
+
+  current = current + 1;
+  sheet.getRange(2, 2).setValue(current);
+
+  return formatProjectNo(current);
+}
+
+function addCRMRecord(newData) {
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName("CRM_Data");
+
+  // 正確：從中央發號拿新號碼
+  const projectno = getNextProjectNo();
+
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+  const rowData = headers.map(header => {
+    if (header === "projectno") return projectno;
+    return newData[header] || "";
+  });
+
+  sheet.appendRow(rowData);
+
+  return "CRM 新案件已新增，專案編號：" + projectno;
+}
+
+function formatProjectNo(value) {
+  return String(value).padStart(3, "0");
+}
+
